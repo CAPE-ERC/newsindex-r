@@ -1,0 +1,148 @@
+---
+title: "Test newsindex against sample_articles.xlsx"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This notebook is a hand-checkable test of the `newsindex` R package. `sample_articles.xlsx`
+(shared with the [Python package's examples](https://github.com/CAPE-ERC/newsindex-library/tree/main/examples))
+has 24 articles across 2 countries (Nigeria, Kenya), 2 newspapers each, and 2 months each
+(3 articles per newspaper-month). Every article was written to hit a known, deliberate
+combination of Economic / Policy / Uncertainty terms from the **real, production**
+`eptu_country_keywords.json` dictionary, and each row's `expected_is_epu` label was
+verified against that dictionary; the `note_for_reviewer` column names exactly which
+terms each title/body hits.
+
+Every newspaper-month has exactly 3 articles: 1 EPU article in the first month, 2 in the
+second. That makes the whole pipeline -- classification, counting, baseline fitting, and
+scoring -- computable by hand:
+
+- `S_it` (EPU share) = 1/3 then 2/3 for every newspaper
+- population std of `[1/3, 2/3]` = 1/6
+- `N_it` = `S_it / sigma_i` = 2.0 then 4.0
+- `mu` (baseline mean of `M_t`) = mean(2.0, 4.0) = **3.0**
+- `EPU_t` = `100 * M_t / mu` = **66.67** in month 1, **133.33** in month 2, for *both* countries
+
+This notebook asserts every one of those numbers against what the package actually
+computes. If it renders with no error, the installed `newsindex` matches this worked
+example exactly.
+
+## Setup
+
+```{r}
+library(newsindex)
+library(readxl)
+```
+
+## Load the sample articles
+
+```{r}
+articles <- as.data.frame(read_excel("sample_articles.xlsx"))
+articles$year_month <- substr(as.character(articles$date), 1, 7)
+head(articles)
+```
+
+## Step 1 -- classify: does `is_epu()` agree with every hand-labeled `expected_is_epu`?
+
+```{r}
+kw <- dictionary_load("eptu_country_keywords.json")
+stopifnot(length(dictionary_validate(kw)) == 0)
+
+articles$actual_is_epu <- vapply(seq_len(nrow(articles)), function(i) {
+  entry <- kw[[articles$country[i]]]
+  is_epu(articles$title[i], articles$text[i], entry$economic, entry$policy, entry$uncertainty)
+}, logical(1))
+
+mismatches <- articles[articles$actual_is_epu != articles$expected_is_epu, ]
+stopifnot(nrow(mismatches) == 0)
+cat("All", nrow(articles), "articles classified exactly as expected.\n")
+articles[, c("country", "site", "date", "title", "expected_is_epu", "note_for_reviewer")]
+```
+
+## Step 2 -- deduplicate (a no-op here: every URL is unique) and count per newspaper-month
+
+```{r}
+deduped <- dedupe_articles(articles)
+stopifnot(nrow(deduped) == nrow(articles))
+
+counts <- count_articles(deduped, kw)
+counts
+```
+
+Expect `epu_articles = c(1, 2)` and `all_articles = 3` for every one of the 4 newspapers'
+2 months.
+
+```{r}
+stopifnot(all(counts$all_articles == 3))
+stopifnot(all(sort(counts$epu_articles) == c(1, 1, 1, 1, 2, 2, 2, 2)))
+```
+
+## Step 3 -- fit the frozen baseline over both months
+
+```{r}
+baseline <- fit_baseline(counts, start = "2024-01", end = "2024-02")
+
+for (country in c("Nigeria", "Kenya")) {
+  stopifnot(isTRUE(all.equal(unname(baseline$mu[country]), 3.0)))
+  for (sigma in baseline$sigma[[country]]) {
+    stopifnot(abs(sigma - 1 / 6) < 1e-9)
+  }
+}
+
+baseline$mu
+baseline$sigma
+```
+
+## Step 4 -- score both months
+
+```{r}
+scored <- score_index(counts, baseline)
+rownames(scored) <- paste(scored$country, scored$year_month)
+
+for (country in c("Nigeria", "Kenya")) {
+  stopifnot(abs(scored[paste(country, "2024-01"), "EPU"] - 200 / 3) < 1e-6)
+  stopifnot(abs(scored[paste(country, "2024-02"), "EPU"] - 400 / 3) < 1e-6)
+}
+
+cat("All EPU values match the hand-computed 66.67 / 133.33.\n")
+scored
+```
+
+## Step 5 -- (optional) baseline persistence and a trivial two-country aggregate
+
+This exercises `baseline_save()`/`baseline_load()` and `aggregate_regions()` on the same
+tiny example, with Nigeria and Kenya given equal, constant GDP weight so the regional
+z-score is just the simple average of the two (identical) country z-score series --
+another number you can check by hand.
+
+```{r}
+baseline_path <- tempfile(fileext = ".json")
+baseline_save(baseline, baseline_path)
+reloaded <- baseline_load(baseline_path)
+stopifnot(isTRUE(all.equal(reloaded$mu, baseline$mu)))
+stopifnot(isTRUE(all.equal(reloaded$sigma, baseline$sigma)))
+
+gdp <- data.frame(
+  country = c("Nigeria", "Nigeria", "Kenya", "Kenya"),
+  year_month = c("2024-01", "2024-02", "2024-01", "2024-02"),
+  gdp = c(50.0, 50.0, 50.0, 50.0),
+  stringsAsFactors = FALSE
+)
+
+regions <- aggregate_regions(
+  scored, gdp,
+  groups = list(TestRegion = c("Nigeria", "Kenya")),
+  baseline = reloaded, include_africa = FALSE
+)
+regions
+```
+
+## Done
+
+Every `stopifnot()` above passed, which means the installed `newsindex` reproduces this
+worked example exactly: classification, newspaper-month counting, baseline fitting
+(`sigma`, `mu`), scoring (`EPU_t`), baseline persistence, and GDP-weighted aggregation --
+matching the Python package's `test_with_excel.ipynb` result exactly.
