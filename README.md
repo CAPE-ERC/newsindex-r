@@ -62,6 +62,10 @@ R doesn't have Python's submodules, so every function is flat in the `newsindex`
 - **Freeze.** `sigma_i`, `mu`, and the retained newspapers are saved as a JSON baseline (`baseline_save()`/`baseline_load()`); later months are scored against it and never recalibrated.
 - **Aggregate.** `z_ct = (EPU_ct - m_c) / s_c`; regional `Z_rt = sum(w_ct * z_ct)` with GDP-PPP weights; rescaled to `100 + 10 * standardised Z_rt`. The Africa series applies the same steps across all countries directly -- it is not an average of the regional series.
 
+## Examples
+
+See [`examples/`](examples/) for a hand-labeled test dataset (`sample_articles.xlsx`, shared with the Python repo) and two R Markdown notebooks that run the full pipeline against it (`test_with_excel.Rmd`, already rendered to `.html`) and against the real Drive archive (`test_with_drive.Rmd`).
+
 ## Data
 
 `inst/extdata/eptu_country_keywords.json` and `inst/extdata/gdp_ppp_2015_2025.csv` are the same production files bundled in the Python repo's `data/` folder (reach them via `system.file("extdata", ..., package = "newsindex")` once the package is installed).

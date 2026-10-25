@@ -1,0 +1,154 @@
+---
+title: "Test newsindex against the real Drive archive"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
+```
+
+This notebook runs the full `newsindex` pipeline against the **real** scraped-article
+archive in Google Drive (`Shak_Scrapped_Top_Articles`, shared at
+<https://drive.google.com/drive/u/0/folders/1BF9Y2x9leJJ0lb6ftPmPeYT7Abrk3ygw>), laid
+out as `<root>/<country>/<newspaper>/<year-month>/articles_<newspaper>_<year-month>.csv.gz`
+-- exactly what `newsindex::read_articles()` expects. It is the R counterpart of the
+Python package's `test_with_drive.ipynb`.
+
+Unlike `test_with_excel.Rmd` (a tiny, hand-computed fixture), this is real data: there
+is no "expected" answer to assert against, so this notebook prints and sanity-checks
+results instead of `stopifnot()`-ing exact numbers. Chunks default to `eval = FALSE`
+(see the `setup` chunk) since this notebook needs your own Drive path to run -- set
+`DRIVE_ROOT` below and knit with `eval = TRUE`, or run chunks interactively.
+
+**Scope warning.** The full archive is ~21.5 million articles across 54 countries. Do
+not point `DRIVE_ROOT` at the archive root and run this unmodified -- it will take a
+very long time and use a lot of memory over a Drive mount/sync. `COUNTRIES` below
+defaults to a couple of fast-to-read countries; widen it deliberately once you know the
+runtime you're willing to accept.
+
+## 1. Point at the archive
+
+The most reliable route on a desktop machine is Google Drive for Desktop syncing the
+folder locally -- for this project that has historically been
+`G:\My Drive\News_Articles_Africa_Workbook\Main_Monthly_Scrapper\Scrapped_Top_Articles`
+(adjust the drive letter / path to match your own machine). If you'd rather access
+Drive programmatically without a desktop sync, the
+[`googledrive`](https://googledrive.tidyverse.org/) package can download a folder's
+contents to a local directory first (`googledrive::drive_download()` /
+`drive_ls()` + a download loop), after which the rest of this notebook is unchanged.
+
+```{r}
+DRIVE_ROOT <- "G:/My Drive/News_Articles_Africa_Workbook/Main_Monthly_Scrapper/Scrapped_Top_Articles"
+stopifnot(dir.exists(DRIVE_ROOT))
+```
+
+## 2. Load `newsindex`
+
+This notebook assumes it is run from inside a clone of
+[CAPE-ERC/newsindex-r](https://github.com/CAPE-ERC/newsindex-r), so the bundled
+`inst/extdata/eptu_country_keywords.json` is reachable via `system.file()` once the
+package is installed (`remotes::install_github("CAPE-ERC/newsindex-r")`), or via
+`devtools::load_all("..")` when working from a source checkout as here.
+
+```{r}
+library(newsindex)
+```
+
+## 3. Read a limited slice of the real archive
+
+`read_articles()` derives the `country` column from the first path segment under the
+directory you point it at, so pointing it at a single country's folder would mislabel
+every article with the *newspaper* name instead. We work around that here by reading
+each requested country separately and overwriting `country` with the value we already
+know.
+
+```{r}
+# Keep this small on a first run; each entry here is one full country folder.
+COUNTRIES <- c("Nigeria", "Kenya")
+
+frames <- lapply(COUNTRIES, function(country) {
+  country_root <- file.path(DRIVE_ROOT, country)
+  if (!dir.exists(country_root)) {
+    message("skipping ", country, ": ", country_root, " not found")
+    return(NULL)
+  }
+  frame <- read_articles(country_root)
+  frame$country <- country # read_articles() thought the newspaper name was the country
+  message(country, ": ", nrow(frame), " articles")
+  frame
+})
+articles <- do.call(rbind, Filter(Negate(is.null), frames))
+head(articles)
+```
+
+## 4. Deduplicate and classify against the production dictionary
+
+```{r}
+stopifnot(nrow(articles) > 0)
+
+dict_path <- system.file("extdata", "eptu_country_keywords.json", package = "newsindex")
+if (!nzchar(dict_path)) {
+  # Source checkout without an installed package:
+  dict_path <- "../inst/extdata/eptu_country_keywords.json"
+}
+kw <- dictionary_load(dict_path)
+issues <- dictionary_validate(kw)
+cat("dictionary covers", length(kw), "countries,", length(issues), "validation issue(s)\n")
+cat("fingerprint:", dictionary_fingerprint(kw), "\n")
+
+deduped <- dedupe_articles(articles)
+cat(nrow(articles) - nrow(deduped), "duplicate article(s) removed within country-month\n")
+
+counts <- count_articles(deduped, kw)
+counts[order(counts$country, counts$site, counts$year_month), ]
+```
+
+## 5. Fit a baseline and score
+
+Adjust `BASELINE_START` / `BASELINE_END` to match the months actually present in
+`counts` above -- the frozen methodology baseline is 2015-01 to 2025-12, but a small
+test slice of the archive may not cover that whole window.
+
+```{r}
+BASELINE_START <- min(counts$year_month)
+BASELINE_END <- max(counts$year_month)
+cat("fitting baseline over", BASELINE_START, "to", BASELINE_END, "\n")
+
+baseline <- fit_baseline(counts, start = BASELINE_START, end = BASELINE_END)
+for (country in COUNTRIES) {
+  retained <- baseline_retained_sites(baseline, country)
+  cat(country, ":", length(retained), "retained newspaper(s) ->", paste(retained, collapse = ", "), "\n")
+}
+
+scored <- score_index(counts, baseline)
+scored[order(scored$country, scored$year_month), ]
+```
+
+## 6. (Optional) GDP-weighted aggregation
+
+Only meaningful once you have more than one country in `COUNTRIES` above with a shared
+baseline window; with a single country the "region" weight is trivially 1.0.
+
+```{r}
+if (length(COUNTRIES) > 1) {
+  gdp_path <- system.file("extdata", "gdp_ppp_2015_2025.csv", package = "newsindex")
+  if (!nzchar(gdp_path)) gdp_path <- "../inst/extdata/gdp_ppp_2015_2025.csv"
+  gdp <- monthly_gdp(gdp_path, scale = 1000)
+  regions <- aggregate_regions(
+    scored, gdp,
+    groups = list(Sample = COUNTRIES), baseline = baseline, include_africa = FALSE
+  )
+  regions[order(regions$group, regions$year_month), ]
+} else {
+  cat("skipped: needs 2+ countries\n")
+}
+```
+
+## Done
+
+This ran the exact same `newsindex` functions as `test_with_excel.Rmd` --
+`read_articles()`, `dedupe_articles()`, `dictionary_load()`/`validate()`/`fingerprint()`,
+`count_articles()`/`fit_baseline()`/`score_index()`, and `monthly_gdp()`/
+`aggregate_regions()` -- but against real scraped articles pulled from Drive instead of
+the hand-labeled fixture. Widen `COUNTRIES` (or point `DRIVE_ROOT` at the full archive)
+once you're satisfied with the runtime on a small slice.

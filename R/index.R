@@ -188,7 +188,7 @@ baseline_save <- function(baseline, path) {
       countries
     )
   )
-  writeLines(jsonlite::toJSON(payload, auto_unbox = TRUE, pretty = TRUE, null = "null"), path)
+  writeLines(jsonlite::toJSON(payload, auto_unbox = TRUE, pretty = TRUE, null = "null", digits = NA), path)
   invisible(path)
 }
 

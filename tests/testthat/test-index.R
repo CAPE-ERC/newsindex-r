@@ -117,3 +117,22 @@ test_that("baseline_save and baseline_load round-trip", {
   expect_equal(reloaded$dictionary_fingerprint, "abc123")
   expect_equal(unname(reloaded$mu["Freedonia"]), 2.0)
 })
+
+test_that("baseline_save does not lose precision on values needing many digits", {
+  # A regression test for a real bug: jsonlite::toJSON() truncates to 4
+  # significant digits by default, which silently corrupted a sigma of
+  # 1/6 = 0.1666... to 0.1667 on a save/load round-trip.
+  counts <- data.frame(
+    country = "Freedonia", site = rep(c("SiteA", "SiteB"), each = 3),
+    year_month = rep(c("2020-01", "2020-02", "2020-03"), 2),
+    epu_articles = c(1, 2, 1, 1, 2, 1), all_articles = c(3, 3, 3, 3, 3, 4),
+    stringsAsFactors = FALSE
+  )
+  baseline <- fit_baseline(counts, "2020-01", "2020-03")
+  path <- tempfile(fileext = ".json")
+  baseline_save(baseline, path)
+  reloaded <- baseline_load(path)
+
+  expect_equal(reloaded$sigma, baseline$sigma)
+  expect_equal(reloaded$mu, baseline$mu)
+})
