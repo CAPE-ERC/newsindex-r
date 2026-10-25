@@ -1,0 +1,31 @@
+Package: newsindex
+Title: News-Based Economic Policy Uncertainty (EPU) Indices
+Version: 0.1.0
+Authors@R: person("Shakir Adeyemi", "Tewogbade", role = c("aut", "cre"),
+    email = "113283849+chaqBD@users.noreply.github.com")
+Description: Builds news-based Economic Policy Uncertainty (EPU) indices
+    from newspaper archives, implementing the method behind the CAPE
+    Africa EPU Index (Baker, Bloom and Davis 2016, adapted for
+    multilingual African press). Provides Unicode-aware multilingual
+    term matching, country keyword dictionary loading and validation,
+    article deduplication, newspaper-month counting against a frozen
+    baseline, and GDP-PPP-weighted regional and Africa aggregation.
+    This is the R counterpart of the Python 'newsindex' package
+    (<https://github.com/CAPE-ERC/newsindex-library>); see that
+    project's README for the full method.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+Depends: R (>= 4.1)
+Imports:
+    digest,
+    jsonlite,
+    stats,
+    stringi,
+    utils
+Suggests:
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
+URL: https://github.com/CAPE-ERC/newsindex-r
+BugReports: https://github.com/CAPE-ERC/newsindex-r/issues
+Config/roxygen2/version: 8.1.1
