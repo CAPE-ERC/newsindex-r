@@ -1,12 +1,13 @@
-#' Country z-scores, GDP weights, and regional / Africa aggregation
+#' Country z-scores, weighting, and regional / Africa aggregation
 #'
 #' Implements the four computation steps from the CAPE Africa EPU
 #' methodology: standardise each country's index against its own baseline,
-#' weight by within-group GDP-PPP share, take the GDP-weighted average of
-#' country z-scores, and rescale the result to a baseline mean of 100 and
-#' standard deviation of 10. The Africa aggregate applies the same four
-#' steps across all countries directly; it is not an average of the
-#' regional series.
+#' weight by within-group share (GDP-PPP by default, or any table or
+#' custom weighting function -- see [aggregate_regions()]), take the
+#' weighted average of country z-scores, and rescale the result to a
+#' baseline mean of 100 and standard deviation of 10. The Africa aggregate
+#' applies the same four steps across all countries directly; it is not an
+#' average of the regional series.
 #'
 #' @name aggregate
 NULL
@@ -61,15 +62,17 @@ DEFAULT_COUNTRY_ALIASES <- c(
   "The Gambia" = "Gambia"
 )
 
-#' Interpolate annual GDP-PPP to monthly values
+#' Interpolate annual GDP-PPP (or any other annual-by-country metric) to
+#' monthly values
 #'
 #' Each annual value is placed at 1 January of its year and interpolated
 #' linearly in logarithms through the next year's figure. After a country's
 #' last annual figure, the value is held flat (carried forward), optionally
 #' through `end` (a `"YYYY-MM"` string).
 #'
-#' @param path Path to a CSV with country, year, and value columns.
-#' @param country_col,year_col,value_col Column names in the source CSV.
+#' @param source Either a path to a CSV with country, year, and value
+#'   columns, or an already-loaded data.frame with those columns.
+#' @param country_col,year_col,value_col Column names in `source`.
 #' @param scale Multiplies every value after it is read, e.g. `scale = 1000`
 #'   to convert a billions-denominated source file to millions.
 #' @param end Optional `"YYYY-MM"` string to carry the last year's value
@@ -78,10 +81,14 @@ DEFAULT_COUNTRY_ALIASES <- c(
 #'   canonical names (default [DEFAULT_COUNTRY_ALIASES]).
 #' @return A data.frame with columns `country`, `year_month`, `gdp`.
 #' @export
-monthly_gdp <- function(path, country_col = "Country", year_col = "Year",
+monthly_gdp <- function(source, country_col = "Country", year_col = "Year",
                          value_col = "GDP_Billions_USD", scale = 1,
                          end = NULL, aliases = DEFAULT_COUNTRY_ALIASES) {
-  raw <- utils::read.csv(path, stringsAsFactors = FALSE, check.names = FALSE)
+  raw <- if (is.data.frame(source)) {
+    source
+  } else {
+    utils::read.csv(source, stringsAsFactors = FALSE, check.names = FALSE)
+  }
   country_values <- raw[[country_col]]
   mapped <- aliases[country_values]
   raw[[country_col]] <- ifelse(is.na(mapped), country_values, mapped)
@@ -142,14 +149,28 @@ monthly_gdp <- function(path, country_col = "Country", year_col = "Year",
 
 .population_stats <- function(x) c(mean = mean(x), sd = .population_sd(x))
 
-#' GDP-PPP-weighted regional (and, by default, Africa-wide) EPU series
+#' Weighted regional (and, by default, Africa-wide) EPU series
 #'
 #' @param country_index A data.frame with `country`, `year_month`, and
 #'   `EPU` columns (as produced by [score_index()]).
-#' @param gdp A data.frame with `country`, `year_month`, and `gdp` columns
-#'   (as produced by [monthly_gdp()]).
+#' @param weights Controls how countries are combined within each group,
+#'   and is either:
+#'   * A data.frame with `country`, `year_month`, and a weight-value
+#'     column (`weight_col`, default `"gdp"` -- the column name produced
+#'     by [monthly_gdp()]). Only countries present in this table are
+#'     included. Within each group and month, countries are weighted by
+#'     their share of the group's total.
+#'   * A function `function(month_rows, group_name)`, called once per
+#'     group per month with that month's rows for the group (columns
+#'     include `country` and `z`) and the group's name, returning a
+#'     non-negative weight per row (same length and order as
+#'     `month_rows`). Weights don't need to be pre-normalised -- they are
+#'     divided by their own sum -- so e.g. equal weighting is
+#'     `function(rows, group) rep(1, nrow(rows))`.
 #' @param groups A named list of character vectors (default
 #'   [AFRICA_REGIONS]).
+#' @param weight_col Column in `weights` holding the weight value, when
+#'   `weights` is a data.frame (default `"gdp"`).
 #' @param baseline Optional `newsindex_baseline` used to score
 #'   `country_index`; if given, its `start`/`end` override
 #'   `baseline_start`/`baseline_end`.
@@ -159,9 +180,10 @@ monthly_gdp <- function(path, country_col = "Country", year_col = "Year",
 #' @param include_africa If `TRUE` (default), also compute an `"Africa"`
 #'   group spanning the union of all countries in `groups`.
 #' @return A data.frame with columns `group`, `year_month`, `z`, `index`,
-#'   `n_countries`, `gdp_covered`.
+#'   `n_countries`, `weight_covered`.
 #' @export
-aggregate_regions <- function(country_index, gdp, groups = AFRICA_REGIONS, baseline = NULL,
+aggregate_regions <- function(country_index, weights, groups = AFRICA_REGIONS,
+                               weight_col = "gdp", baseline = NULL,
                                baseline_start = "2015-01", baseline_end = "2025-12",
                                include_africa = TRUE) {
   if (!is.null(baseline)) {
@@ -169,7 +191,11 @@ aggregate_regions <- function(country_index, gdp, groups = AFRICA_REGIONS, basel
     baseline_end <- baseline$end
   }
 
-  merged <- merge(country_index, gdp, by = c("country", "year_month"))
+  merged <- if (is.function(weights)) {
+    country_index
+  } else {
+    merge(country_index, weights, by = c("country", "year_month"))
+  }
   window <- merged[merged$year_month >= baseline_start & merged$year_month <= baseline_end, ]
 
   country_stats <- list()
@@ -197,14 +223,19 @@ aggregate_regions <- function(country_index, gdp, groups = AFRICA_REGIONS, basel
     if (nrow(group_data) == 0) next
     for (year_month in sort(unique(group_data$year_month))) {
       month_rows <- group_data[group_data$year_month == year_month, ]
-      total_gdp <- sum(month_rows$gdp)
-      if (total_gdp <= 0) next
-      weight <- month_rows$gdp / total_gdp
+      raw_weight <- if (is.function(weights)) {
+        weights(month_rows, group_name)
+      } else {
+        month_rows[[weight_col]]
+      }
+      total_weight <- sum(raw_weight)
+      if (total_weight <= 0) next
+      weight <- raw_weight / total_weight
       group_rows[[length(group_rows) + 1]] <- data.frame(
         group = group_name, year_month = year_month,
         Z = sum(weight * month_rows$z),
         n_countries = length(unique(month_rows$country)),
-        gdp_covered = total_gdp, stringsAsFactors = FALSE
+        weight_covered = total_weight, stringsAsFactors = FALSE
       )
     }
   }
@@ -212,7 +243,7 @@ aggregate_regions <- function(country_index, gdp, groups = AFRICA_REGIONS, basel
   if (length(group_rows) == 0) {
     return(data.frame(
       group = character(), year_month = character(), z = numeric(),
-      index = numeric(), n_countries = integer(), gdp_covered = numeric()
+      index = numeric(), n_countries = integer(), weight_covered = numeric()
     ))
   }
   regional <- do.call(rbind, group_rows)
@@ -229,14 +260,14 @@ aggregate_regions <- function(country_index, gdp, groups = AFRICA_REGIONS, basel
     output_rows[[length(output_rows) + 1]] <- data.frame(
       group = rows$group, year_month = rows$year_month, z = rows$Z,
       index = 100 + 10 * (rows$Z - m_r) / s_r,
-      n_countries = rows$n_countries, gdp_covered = rows$gdp_covered,
+      n_countries = rows$n_countries, weight_covered = rows$weight_covered,
       stringsAsFactors = FALSE
     )
   }
   if (length(output_rows) == 0) {
     return(data.frame(
       group = character(), year_month = character(), z = numeric(),
-      index = numeric(), n_countries = integer(), gdp_covered = numeric()
+      index = numeric(), n_countries = integer(), weight_covered = numeric()
     ))
   }
   result <- do.call(rbind, output_rows)

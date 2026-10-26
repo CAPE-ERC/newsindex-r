@@ -67,7 +67,7 @@ test_that("aggregate_regions matches a hand-computed weighted z-score", {
   expect_equal(region["2020-01", "index"], 100.0)
   expect_equal(region["2020-02", "index"], 100.0 + 50.0 * 0.2 * sqrt(2))
   expect_equal(region["2020-02", "n_countries"], 2L)
-  expect_equal(region["2020-02", "gdp_covered"], 100.0)
+  expect_equal(region["2020-02", "weight_covered"], 100.0)
 })
 
 test_that("aggregate_regions' Africa group defaults to the union of all regions", {
@@ -87,4 +87,45 @@ test_that("aggregate_regions can disable the Africa group", {
     baseline_start = "2020-01", baseline_end = "2020-04", include_africa = FALSE
   )
   expect_false("Africa" %in% result$group)
+})
+
+test_that("aggregate_regions accepts a table with a custom weight column", {
+  groups <- list(TestRegion = c("X", "Y"))
+  population <- .gdp()
+  names(population)[names(population) == "gdp"] <- "population"
+  result <- aggregate_regions(.country_index(), population, groups,
+    weight_col = "population", baseline_start = "2020-01", baseline_end = "2020-04"
+  )
+  region <- result[result$group == "TestRegion", ]
+  rownames(region) <- region$year_month
+  expect_equal(region["2020-02", "index"], 100.0 + 50.0 * 0.2 * sqrt(2))
+})
+
+test_that("aggregate_regions accepts a callable weighting function", {
+  groups <- list(TestRegion = c("X", "Y"))
+  only_x <- function(month_rows, group_name) ifelse(month_rows$country == "X", 1.0, 0.0)
+
+  result <- aggregate_regions(.country_index(), only_x, groups,
+    baseline_start = "2020-01", baseline_end = "2020-04"
+  )
+  region <- result[result$group == "TestRegion", ]
+  rownames(region) <- region$year_month
+
+  # Weighting X at 1 and Y at 0 reduces the group series to X's own
+  # z-score exactly (baseline std sqrt(50)).
+  expect_equal(region["2020-01", "z"], 0.0, tolerance = 1e-9)
+  expect_equal(region["2020-02", "z"], sqrt(2))
+  expect_equal(region["2020-03", "z"], -sqrt(2))
+  expect_equal(region["2020-02", "weight_covered"], 1.0)
+})
+
+test_that("monthly_gdp accepts an in-memory data.frame", {
+  table <- data.frame(
+    Country = c("Freedonia", "Freedonia"), Year = c(2020, 2021),
+    GDP_Billions_USD = c(100, 200), stringsAsFactors = FALSE
+  )
+  monthly <- monthly_gdp(table)
+  rownames(monthly) <- monthly$year_month
+  expect_equal(monthly["2020-01", "gdp"], 100.0)
+  expect_equal(monthly["2021-01", "gdp"], 200.0)
 })

@@ -2,13 +2,14 @@
 % Please edit documentation in R/aggregate.R
 \name{aggregate}
 \alias{aggregate}
-\title{Country z-scores, GDP weights, and regional / Africa aggregation}
+\title{Country z-scores, weighting, and regional / Africa aggregation}
 \description{
 Implements the four computation steps from the CAPE Africa EPU
 methodology: standardise each country's index against its own baseline,
-weight by within-group GDP-PPP share, take the GDP-weighted average of
-country z-scores, and rescale the result to a baseline mean of 100 and
-standard deviation of 10. The Africa aggregate applies the same four
-steps across all countries directly; it is not an average of the
-regional series.
+weight by within-group share (GDP-PPP by default, or any table or
+custom weighting function -- see \code{\link[=aggregate_regions]{aggregate_regions()}}), take the
+weighted average of country z-scores, and rescale the result to a
+baseline mean of 100 and standard deviation of 10. The Africa aggregate
+applies the same four steps across all countries directly; it is not an
+average of the regional series.
 }

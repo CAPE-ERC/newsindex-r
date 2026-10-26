@@ -2,12 +2,13 @@
 % Please edit documentation in R/aggregate.R
 \name{aggregate_regions}
 \alias{aggregate_regions}
-\title{GDP-PPP-weighted regional (and, by default, Africa-wide) EPU series}
+\title{Weighted regional (and, by default, Africa-wide) EPU series}
 \usage{
 aggregate_regions(
   country_index,
-  gdp,
+  weights,
   groups = AFRICA_REGIONS,
+  weight_col = "gdp",
   baseline = NULL,
   baseline_start = "2015-01",
   baseline_end = "2025-12",
@@ -18,11 +19,28 @@ aggregate_regions(
 \item{country_index}{A data.frame with \code{country}, \code{year_month}, and
 \code{EPU} columns (as produced by \code{\link[=score_index]{score_index()}}).}
 
-\item{gdp}{A data.frame with \code{country}, \code{year_month}, and \code{gdp} columns
-(as produced by \code{\link[=monthly_gdp]{monthly_gdp()}}).}
+\item{weights}{Controls how countries are combined within each group,
+and is either:
+\itemize{
+\item A data.frame with \code{country}, \code{year_month}, and a weight-value
+column (\code{weight_col}, default \code{"gdp"} -- the column name produced
+by \code{\link[=monthly_gdp]{monthly_gdp()}}). Only countries present in this table are
+included. Within each group and month, countries are weighted by
+their share of the group's total.
+\item A function \verb{function(month_rows, group_name)}, called once per
+group per month with that month's rows for the group (columns
+include \code{country} and \code{z}) and the group's name, returning a
+non-negative weight per row (same length and order as
+\code{month_rows}). Weights don't need to be pre-normalised -- they are
+divided by their own sum -- so e.g. equal weighting is
+\code{function(rows, group) rep(1, nrow(rows))}.
+}}
 
 \item{groups}{A named list of character vectors (default
 \link{AFRICA_REGIONS}).}
+
+\item{weight_col}{Column in \code{weights} holding the weight value, when
+\code{weights} is a data.frame (default \code{"gdp"}).}
 
 \item{baseline}{Optional \code{newsindex_baseline} used to score
 \code{country_index}; if given, its \code{start}/\code{end} override
@@ -37,8 +55,8 @@ group spanning the union of all countries in \code{groups}.}
 }
 \value{
 A data.frame with columns \code{group}, \code{year_month}, \code{z}, \code{index},
-\code{n_countries}, \code{gdp_covered}.
+\code{n_countries}, \code{weight_covered}.
 }
 \description{
-GDP-PPP-weighted regional (and, by default, Africa-wide) EPU series
+Weighted regional (and, by default, Africa-wide) EPU series
 }
