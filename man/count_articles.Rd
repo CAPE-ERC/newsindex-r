@@ -31,3 +31,12 @@ Every article's country must be present in \code{dictionary}; an error is
 raised naming any country that is not, since a missing country silently
 produces an undercount rather than a visible failure.
 }
+\details{
+Classification is vectorized and short-circuits: per country, each
+component (Economic, Policy, Uncertainty) is checked only against the
+rows that survived the previous component, since EPU requires all
+three, using the cheap-then-precise two-stage pattern (see
+\code{\link[=loose_component_pattern]{loose_component_pattern()}}). This avoids both the per-row/per-term loop
+and the full boundary-checked regex cost on articles that plainly don't
+qualify, which is most of them.
+}

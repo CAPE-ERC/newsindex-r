@@ -42,16 +42,19 @@ normalize_text <- function(value) {
   stringi::stri_detect_regex(character, "^[\\p{L}\\p{N}\\p{M}]$")
 }
 
-.term_pattern_cache <- new.env(parent = emptyenv())
+.term_body_cache <- new.env(parent = emptyenv())
 
-.compiled_term_pattern <- function(term) {
-  normalized <- normalize_text(term)
-  cached <- .term_pattern_cache[[normalized]]
+# The escaped, separator-flexible middle of a term's pattern: its words
+# joined by `(?:-|\s)+` so a dash and a space are interchangeable between
+# them, same as normalize_text() already folds dash variants and collapses
+# whitespace within a single string. No boundary assertions.
+.term_body <- function(normalized) {
+  cached <- .term_body_cache[[normalized]]
   if (!is.null(cached)) {
     return(cached)
   }
   if (!nzchar(normalized)) {
-    pattern <- "(?!x)x"
+    body <- "(?!x)x"
   } else {
     pieces <- stringi::stri_split_regex(normalized, "[\\s-]+")[[1]]
     pieces <- pieces[nzchar(pieces)]
@@ -60,6 +63,23 @@ normalize_text <- function(value) {
       pattern = "([.^$|()\\[\\]{}*+?\\\\-])", replacement = "\\\\$1"
     )
     body <- paste(escaped, collapse = "(?:-|\\s)+")
+  }
+  .term_body_cache[[normalized]] <- body
+  body
+}
+
+.term_pattern_cache <- new.env(parent = emptyenv())
+
+.compiled_term_pattern <- function(term) {
+  normalized <- normalize_text(term)
+  cached <- .term_pattern_cache[[normalized]]
+  if (!is.null(cached)) {
+    return(cached)
+  }
+  body <- .term_body(normalized)
+  if (!nzchar(normalized)) {
+    pattern <- body
+  } else {
     first_char <- stringi::stri_sub(normalized, 1, 1)
     last_char <- stringi::stri_sub(normalized, -1, -1)
     left <- if (.is_word_character(first_char)) "(?<![\\p{L}\\p{N}\\p{M}_])" else ""
@@ -159,4 +179,83 @@ is_epu <- function(title, body, economic_terms, policy_terms, uncertainty_terms)
     uncertainty = uncertainty_terms
   ))
   unname(flags["economic"] && flags["policy"] && flags["uncertainty"])
+}
+
+.combined_pattern_cache <- new.env(parent = emptyenv())
+.combined_loose_pattern_cache <- new.env(parent = emptyenv())
+
+.distinct_normalized_terms <- function(terms) {
+  terms <- terms[vapply(terms, function(t) nzchar(trimws(as.character(t))), logical(1))]
+  if (length(terms) == 0) {
+    return(character(0))
+  }
+  terms[!duplicated(vapply(terms, normalize_text, character(1)))]
+}
+
+#' One combined regex matching normalized text that contains any of `terms`
+#'
+#' Equivalent to `any(term_matches(text, term) for term in terms)` but as a
+#' single alternation, so a whole vector of articles can be tested against a
+#' component in one vectorized call (`stringi::stri_detect_regex`) instead
+#' of one call per term per row. Memoized per distinct `terms` vector (as a
+#' cache key), since the same dictionary component is reused across every
+#' row and batch of a run.
+#'
+#' This still carries each term's word-boundary assertions, which cost real
+#' regex-engine time per character scanned. When most rows won't contain
+#' any of `terms` at all (the common case classifying real articles), check
+#' [loose_component_pattern()] first and only run this on the rows it
+#' flags -- see its docstring.
+#'
+#' @param terms Character vector of dictionary terms.
+#' @return A single regex pattern string (for `stringi::stri_*_regex`).
+#' @export
+component_pattern <- function(terms) {
+  key <- paste(terms, collapse = "\u0001")
+  cached <- .combined_pattern_cache[[key]]
+  if (!is.null(cached)) {
+    return(cached)
+  }
+  distinct <- .distinct_normalized_terms(terms)
+  pattern <- if (length(distinct) == 0) {
+    "(?!x)x"
+  } else {
+    paste0("(?:", vapply(distinct, .compiled_term_pattern, character(1)), ")", collapse = "|")
+  }
+  .combined_pattern_cache[[key]] <- pattern
+  pattern
+}
+
+#' A cheap, over-inclusive version of [component_pattern()]
+#'
+#' Same terms, same dash/whitespace flexibility between words, but without
+#' the word-boundary lookaround assertions -- so this can only produce
+#' false positives relative to [component_pattern()], never false
+#' negatives (dropping a check can't make a pattern match less). Matching
+#' it is substantially cheaper per character scanned, since there's no
+#' lookaround to evaluate at every position.
+#'
+#' Use it as a prefilter: test a whole vector with this pattern first, then
+#' run [component_pattern()] only on the rows it flagged. Most articles
+#' don't contain any term from a given component at all, so this avoids
+#' ever running the expensive pattern over the great majority of rows.
+#'
+#' @inheritParams component_pattern
+#' @return A single regex pattern string (for `stringi::stri_*_regex`).
+#' @export
+loose_component_pattern <- function(terms) {
+  key <- paste(terms, collapse = "\u0001")
+  cached <- .combined_loose_pattern_cache[[key]]
+  if (!is.null(cached)) {
+    return(cached)
+  }
+  distinct <- .distinct_normalized_terms(terms)
+  pattern <- if (length(distinct) == 0) {
+    "(?!x)x"
+  } else {
+    bodies <- vapply(distinct, function(t) .term_body(normalize_text(t)), character(1))
+    paste0("(?:", bodies, ")", collapse = "|")
+  }
+  .combined_loose_pattern_cache[[key]] <- pattern
+  pattern
 }

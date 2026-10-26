@@ -177,3 +177,111 @@ test_that("baseline_save does not lose precision on values needing many digits",
   expect_equal(reloaded$sigma, baseline$sigma)
   expect_equal(reloaded$mu, baseline$mu)
 })
+
+.write_count_archive_dictionary <- function(path) {
+  writeLines(jsonlite::toJSON(list(countries = list(
+    Nigeria = list(
+      languages = list("en"), ECONOMY_TERMS = list("fiscal", "inflation"),
+      POLICY_TERMS = list("government"), UNCERTAINTY_TERMS = list("uncertainty")
+    ),
+    Kenya = list(
+      languages = list("en"), ECONOMY_TERMS = list("fiscal", "inflation"),
+      POLICY_TERMS = list("government"), UNCERTAINTY_TERMS = list("uncertain")
+    )
+  )), auto_unbox = TRUE), path)
+}
+
+.write_count_archive_articles <- function(path, rows) {
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  body <- paste(c("site,date,title,url,text", rows), collapse = "\n")
+  con <- gzfile(path, "w")
+  writeLines(body, con)
+  close(con)
+}
+
+.build_count_archive <- function(root) {
+  .write_count_archive_articles(
+    file.path(root, "Nigeria", "The Punch", "2020-01", "articles_The Punch_2020-01.csv.gz"),
+    c(
+      'The Punch,2020-01-01,"Government fiscal policy creates uncertainty",https://x/n1,body',
+      'The Punch,2020-01-02,"Government fiscal policy creates uncertainty",https://x/n1,body',
+      "The Punch,2020-01-03,Local football result,https://x/n2,body"
+    )
+  )
+  .write_count_archive_articles(
+    file.path(root, "Nigeria", "Vanguard", "2020-01", "articles_Vanguard_2020-01.csv.gz"),
+    'Vanguard,2020-01-04,"Inflation and government uncertainty rise",https://x/n3,body'
+  )
+  .write_count_archive_articles(
+    file.path(root, "Nigeria", "The Punch", "2020-02", "articles_The Punch_2020-02.csv.gz"),
+    "The Punch,2020-02-01,Weather update,https://x/n4,body"
+  )
+  .write_count_archive_articles(
+    file.path(root, "Kenya", "Daily Nation", "2020-01", "articles_Daily Nation_2020-01.csv.gz"),
+    'Daily Nation,2020-01-05,"Government fiscal plan uncertain economy",https://x/k1,body'
+  )
+}
+
+test_that("count_archive matches count_articles(dedupe_articles(read_articles(...)))", {
+  root <- tempfile()
+  dir.create(root)
+  .build_count_archive(root)
+  dict_path <- tempfile(fileext = ".json")
+  .write_count_archive_dictionary(dict_path)
+  kw <- dictionary_load(dict_path)
+
+  streamed <- count_archive(root, kw)
+  whole <- count_articles(dedupe_articles(read_articles(root)), kw)
+
+  sort_cols <- c("country", "site", "year_month")
+  streamed <- streamed[do.call(order, streamed[sort_cols]), ]
+  whole <- whole[do.call(order, whole[sort_cols]), ]
+  rownames(streamed) <- NULL
+  rownames(whole) <- NULL
+  expect_equal(streamed, whole)
+})
+
+test_that("count_archive dedupe = FALSE counts duplicates separately", {
+  root <- tempfile()
+  dir.create(root)
+  .build_count_archive(root)
+  dict_path <- tempfile(fileext = ".json")
+  .write_count_archive_dictionary(dict_path)
+  kw <- dictionary_load(dict_path)
+
+  deduped <- count_archive(root, kw, dedupe = TRUE)
+  raw <- count_archive(root, kw, dedupe = FALSE)
+
+  punch_deduped <- deduped[deduped$country == "Nigeria" & deduped$site == "The Punch", ]
+  punch_raw <- raw[raw$country == "Nigeria" & raw$site == "The Punch", ]
+  expect_equal(sum(punch_raw$all_articles), sum(punch_deduped$all_articles) + 1)
+})
+
+test_that("count_archive countries filters", {
+  root <- tempfile()
+  dir.create(root)
+  .build_count_archive(root)
+  dict_path <- tempfile(fileext = ".json")
+  .write_count_archive_dictionary(dict_path)
+  kw <- dictionary_load(dict_path)
+
+  result <- count_archive(root, kw, countries = "nigeria")
+
+  expect_setequal(result$country, "Nigeria")
+})
+
+test_that("count_archive calls progress once per batch", {
+  root <- tempfile()
+  dir.create(root)
+  .build_count_archive(root)
+  dict_path <- tempfile(fileext = ".json")
+  .write_count_archive_dictionary(dict_path)
+  kw <- dictionary_load(dict_path)
+
+  messages <- character(0)
+  count_archive(root, kw, progress = function(m) messages[[length(messages) + 1]] <<- m)
+
+  # Nigeria/2020-01 (2 newspapers), Nigeria/2020-02, Kenya/2020-01
+  expect_equal(length(messages), 3)
+  expect_true(any(grepl("Nigeria", messages) & grepl("2020-01", messages)))
+})
