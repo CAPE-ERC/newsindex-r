@@ -4,10 +4,18 @@
 \alias{read_articles}
 \title{Read scraped article archives into a single table}
 \usage{
-read_articles(root, encoding = "UTF-8")
+read_articles(root, countries = NULL, encoding = "UTF-8")
 }
 \arguments{
 \item{root}{Path to the top-level archive directory.}
+
+\item{countries}{Restricts which top-level country folders are read:
+\code{NULL} or \code{"all"} (the default) reads every folder under \code{root}; a
+character vector reads only the named folders (matched
+case-insensitively against the folder names actually present, since
+archive folder names don't always match a dictionary's or
+\code{\link[=countries]{countries()}}'s casing). An unmatched name raises an error listing the
+folders that were found, to catch typos early.}
 
 \item{encoding}{File encoding (default \code{"UTF-8"}).}
 }

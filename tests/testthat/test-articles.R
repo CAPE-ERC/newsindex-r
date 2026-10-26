@@ -33,3 +33,46 @@ test_that("read_articles errors when nothing is found", {
   dir.create(root)
   expect_error(read_articles(root), "no article files found")
 })
+
+test_that("read_articles countries filters to the named folders (case-insensitively)", {
+  root <- tempfile()
+  dir.create(root)
+  .write_articles(
+    file.path(root, "Nigeria", "The Punch", "2026-03", "articles_The Punch_2026-03.csv.gz"),
+    c("The Punch,2026-03-01,Headline,https://example.com/a,Text")
+  )
+  .write_articles(
+    file.path(root, "Kenya", "Daily Nation", "2026-03", "articles_Daily Nation_2026-03.csv.gz"),
+    c("Daily Nation,2026-03-02,Economy grows,https://example.com/b,More text")
+  )
+
+  articles <- read_articles(root, countries = "nigeria")
+  expect_setequal(articles$country, "Nigeria")
+})
+
+test_that("read_articles countries 'all' reads every folder", {
+  root <- tempfile()
+  dir.create(root)
+  .write_articles(
+    file.path(root, "Nigeria", "The Punch", "2026-03", "articles_The Punch_2026-03.csv.gz"),
+    c("The Punch,2026-03-01,Headline,https://example.com/a,Text")
+  )
+  .write_articles(
+    file.path(root, "Kenya", "Daily Nation", "2026-03", "articles_Daily Nation_2026-03.csv.gz"),
+    c("Daily Nation,2026-03-02,Economy grows,https://example.com/b,More text")
+  )
+
+  articles <- read_articles(root, countries = "all")
+  expect_setequal(articles$country, c("Nigeria", "Kenya"))
+})
+
+test_that("read_articles countries errors on an unknown folder", {
+  root <- tempfile()
+  dir.create(root)
+  .write_articles(
+    file.path(root, "Nigeria", "The Punch", "2026-03", "articles_The Punch_2026-03.csv.gz"),
+    c("The Punch,2026-03-01,Headline,https://example.com/a,Text")
+  )
+
+  expect_error(read_articles(root, countries = c("Nigeria", "Ghana")), "Ghana")
+})

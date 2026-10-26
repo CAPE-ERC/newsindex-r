@@ -7,14 +7,40 @@
 #' table, matching the documented example usage.
 #'
 #' @param root Path to the top-level archive directory.
+#' @param countries Restricts which top-level country folders are read:
+#'   `NULL` or `"all"` (the default) reads every folder under `root`; a
+#'   character vector reads only the named folders (matched
+#'   case-insensitively against the folder names actually present, since
+#'   archive folder names don't always match a dictionary's or
+#'   [countries()]'s casing). An unmatched name raises an error listing the
+#'   folders that were found, to catch typos early.
 #' @param encoding File encoding (default `"UTF-8"`).
 #' @return A data.frame with columns `country`, `site`, `year_month`,
 #'   `date`, `title`, `url`, `text`. Titles and text are HTML-unescaped
 #'   (the scraper stores raw HTML entities such as `&#8217;`) before they
 #'   reach [normalize_text()].
 #' @export
-read_articles <- function(root, encoding = "UTF-8") {
-  files <- list.files(root, pattern = "\\.csv(\\.gz)?$", recursive = TRUE, full.names = TRUE)
+read_articles <- function(root, countries = NULL, encoding = "UTF-8") {
+  available <- list.dirs(root, recursive = FALSE, full.names = FALSE)
+
+  if (is.null(countries) || identical(countries, "all")) {
+    selected <- available
+  } else {
+    by_lower <- stats::setNames(available, tolower(available))
+    matched <- by_lower[tolower(countries)]
+    missing <- countries[is.na(matched)]
+    if (length(missing) > 0) {
+      stop(
+        "country folder(s) not found under ", root, ": ",
+        paste(missing, collapse = ", "), ". Available: ", paste(available, collapse = ", ")
+      )
+    }
+    selected <- unname(matched)
+  }
+
+  files <- unlist(lapply(selected, function(country) {
+    list.files(file.path(root, country), pattern = "\\.csv(\\.gz)?$", recursive = TRUE, full.names = TRUE)
+  }))
   if (length(files) == 0) {
     stop("no article files found under ", root)
   }
