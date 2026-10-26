@@ -13,6 +13,32 @@ remotes::install_github("CAPE-ERC/newsindex-r")
 
 Requires R >= 4.1. Dependencies: `jsonlite`, `stringi`, `digest` (plus base `stats`/`utils`).
 
+## Quick start
+
+`run_index()`/`run_index_with_baseline()` wrap reading, deduplicating, counting, and scoring into a single call, for anyone who just wants an index out of an article archive without assembling the pipeline by hand:
+
+```r
+library(newsindex)
+
+# No baseline: one window, fit and scored in-sample.
+country <- run_index(
+  "Scrapped_Top_Articles/", "data/eptu_country_keywords.json", start = "2020-01", end = "2020-12"
+)
+
+# With baseline: freeze 2015-2024, then score 2025 against it.
+out <- run_index_with_baseline(
+  "Scrapped_Top_Articles/", "data/eptu_country_keywords.json",
+  windows = list(c("2025-01", "2025-12")),
+  baseline_start = "2015-01", baseline_end = "2024-12"
+)
+baseline_save(out$baseline, "baseline_2015_2024.json")  # reuse next run: pass baseline = ... instead
+country <- out$result
+```
+
+Both print progress by default (`verbose = FALSE` to silence) and accept `countries = c(...)` to read only some of the archive's country folders (default: every folder; folder names are matched case-insensitively). Neither function has a bundled default dictionary -- `dictionary_path` is always an explicit argument, since this package ships no proprietary keyword data.
+
+These two calls are thin compositions of `read_articles()`, `dedupe_articles()`, `count_articles()`, and `compute_index()`/`fit_baseline()`+`score_windows()` -- reach for those directly (see Usage below) for anything a single call can't express.
+
 ## Usage
 
 ```r
@@ -55,6 +81,8 @@ R doesn't have Python's submodules, so every function is flat in the `newsindex`
 | `AFRICA_REGIONS` | `AFRICA_REGIONS` | the five CAPE African regions |
 | `read_articles` | `read_articles()` | read a scraped article archive into one table |
 | `countries` | `countries()` | global ISO 3166-1 + UN M49 country/region reference table |
+| `run_index` | `run_index()` | one-call no-baseline pipeline: read, dedupe, count, and compute an index |
+| `run_index_with_baseline` | `run_index_with_baseline()` | one-call with-baseline pipeline: read, dedupe, count, fit/reuse a baseline, and score |
 
 ## Countries
 
