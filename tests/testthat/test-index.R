@@ -105,6 +105,47 @@ test_that("score_index matches hand-computed EPU and freezes dropped sites", {
   expect_equal(scored["2020-05", "n_sites"], 1L)
 })
 
+test_that("compute_index is an in-sample fit and score for one window", {
+  counts <- .hand_computed_counts()
+  result <- compute_index(counts, "2020-01", "2020-04")
+  rownames(result) <- result$year_month
+
+  # Same numbers as fit_baseline+score over the identical window: sigma and
+  # mu are fit from (and only from) this one window, then it is scored
+  # against itself -- nothing is frozen or reused.
+  expect_equal(result["2020-01", "EPU"], 50.0)
+  expect_equal(result["2020-02", "EPU"], 150.0)
+  # The post-baseline 2020-05 row exists in counts but is outside this
+  # single window, so it must not appear in the result.
+  expect_false("2020-05" %in% result$year_month)
+})
+
+test_that("score_windows scores multiple named periods against one frozen baseline", {
+  counts <- rbind(
+    .hand_computed_counts(),
+    data.frame(
+      country = "Freedonia", site = "SiteA", year_month = "2020-06",
+      epu_articles = 1, all_articles = 10, stringsAsFactors = FALSE
+    )
+  )
+  baseline <- fit_baseline(counts, "2020-01", "2020-04")
+
+  result <- score_windows(counts, baseline, list(c("2020-05", "2020-05"), c("2020-06", "2020-06")))
+  rownames(result) <- paste(result$window, result$year_month)
+
+  expect_equal(result["2020-05:2020-05 2020-05", "EPU"], 150.0)
+  expect_equal(result["2020-06:2020-06 2020-06", "EPU"], 50.0)
+  expect_setequal(unique(result$window), c("2020-05:2020-05", "2020-06:2020-06"))
+})
+
+test_that("score_windows with no windows returns an empty frame with expected columns", {
+  counts <- .hand_computed_counts()
+  baseline <- fit_baseline(counts, "2020-01", "2020-04")
+  result <- score_windows(counts, baseline, list())
+  expect_equal(names(result), c("window", "country", "year_month", "EPU", "M_t", "mu", "n_sites"))
+  expect_equal(nrow(result), 0)
+})
+
 test_that("baseline_save and baseline_load round-trip", {
   counts <- .hand_computed_counts()
   baseline <- fit_baseline(counts, "2020-01", "2020-04", dictionary_fingerprint = "abc123")

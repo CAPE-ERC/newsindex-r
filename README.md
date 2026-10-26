@@ -45,8 +45,10 @@ R doesn't have Python's submodules, so every function is flat in the `newsindex`
 | `dedup.canonical_url` | `canonical_url()` | URL normalization for deduplication |
 | `dedup.dedupe` | `dedupe_articles()` | drop duplicate articles within a country-month |
 | `index.count` | `count_articles()` | EPU / total article counts per country-site-month |
+| `index.compute_index` | `compute_index()` | no-baseline variant: fit and score one window in-sample |
 | `index.fit_baseline` | `fit_baseline()` | fit frozen newspaper `sigma` and country `mu` |
-| `index.score` | `score_index()` | score country-months against a frozen baseline |
+| `index.score` | `score_index()` | score one window against a frozen baseline |
+| `index.score_windows` | `score_windows()` | with-baseline variant: score several later windows at once |
 | `Baseline.save` / `.load` | `baseline_save()` / `baseline_load()` | persist/reload a baseline as JSON |
 | `aggregate.monthly_gdp` | `monthly_gdp()` | annual GDP-PPP -> monthly, log-linear interpolation |
 | `aggregate.aggregate` | `aggregate_regions()` | GDP-weighted regional / Africa z-score aggregation |
@@ -57,10 +59,20 @@ R doesn't have Python's submodules, so every function is flat in the `newsindex`
 
 - **Classify.** An article counts as EPU if its title or body contains at least one Economic, one Policy, and one Uncertainty term from its country's dictionary. A term belongs to one component only.
 - **Scale.** `S_it = EPU articles_it / all articles_it` for newspaper *i* in month *t*.
-- **Standardise.** `N_it = S_it / sigma_i`, where `sigma_i` is the newspaper's population standard deviation over the baseline window (default 2015-01 to 2025-12).
+- **Standardise.** `N_it = S_it / sigma_i`, where `sigma_i` is the newspaper's population standard deviation over the baseline window. The window is always chosen by the caller (the published CAPE Africa EPU index uses 2015-01 to 2025-12; the package has no hardcoded default).
 - **Average and normalise.** `M_t` is the mean of `N_it` across newspapers; `EPU_t = 100 * M_t / mu`, where `mu` is the baseline mean of `M_t`.
 - **Freeze.** `sigma_i`, `mu`, and the retained newspapers are saved as a JSON baseline (`baseline_save()`/`baseline_load()`); later months are scored against it and never recalibrated.
 - **Aggregate.** `z_ct = (EPU_ct - m_c) / s_c`; regional `Z_rt = sum(w_ct * z_ct)` with GDP-PPP weights; rescaled to `100 + 10 * standardised Z_rt`. The Africa series applies the same steps across all countries directly -- it is not an average of the regional series.
+
+### Two ways to compute an index
+
+- **No baseline (`compute_index()`).** One window. `sigma`/`mu` are fit *from* that window and used to score that same window -- nothing is frozen or reused. `compute_index(counts, start = "2020-01", end = "2020-12")`.
+- **With baseline (`fit_baseline()` + `score_index()` / `score_windows()`).** Two or more windows. The first window is frozen once (`fit_baseline()`); any later window (or several) is scored against that frozen baseline, never refitting it:
+  ```r
+  baseline <- fit_baseline(counts, start = "2015-01", end = "2024-12")
+  later <- score_windows(counts, baseline, list(c("2025-01", "2025-12")))
+  ```
+  `score_windows()` just calls `score_index()` once per `c(start, end)` pair and tags each result with a `window` column; `score_index(counts, baseline)` alone is equivalent when you only need one later window and don't need that column.
 
 ## Examples
 
