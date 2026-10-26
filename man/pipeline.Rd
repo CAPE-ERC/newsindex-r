@@ -4,10 +4,13 @@
 \alias{pipeline}
 \title{One-call orchestration of the EPU pipeline for non-technical users}
 \description{
-\code{run_index()} and \code{run_index_with_baseline()} wrap \code{\link[=dictionary_load]{dictionary_load()}},
-\code{\link[=read_articles]{read_articles()}}, \code{\link[=dedupe_articles]{dedupe_articles()}}, \code{\link[=count_articles]{count_articles()}}, and
+\code{run_index()} and \code{run_index_with_baseline()} wrap \code{\link[=dictionary_load]{dictionary_load()}}
+and \code{\link[=count_archive]{count_archive()}} (which streams the article archive straight into
+EPU counts, country-month by country-month, never materializing the
+whole requested scope in memory at once) with
 \code{\link[=compute_index]{compute_index()}}/\code{\link[=fit_baseline]{fit_baseline()}}+\code{\link[=score_windows]{score_windows()}} into a single call.
-Anyone who needs one of those steps to behave differently should call
-the underlying functions directly instead -- these two exist only to
-remove the boilerplate around the common case.
+Anyone who needs read/dedupe/count as separate, in-memory steps should
+call \code{\link[=read_articles]{read_articles()}}, \code{\link[=dedupe_articles]{dedupe_articles()}}, and \code{\link[=count_articles]{count_articles()}}
+directly instead -- these two exist only to remove the boilerplate
+around the common case.
 }

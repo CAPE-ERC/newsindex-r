@@ -23,12 +23,18 @@ folders that were found, to catch typos early.}
 A data.frame with columns \code{country}, \code{site}, \code{year_month},
 \code{date}, \code{title}, \code{url}, \code{text}. Titles and text are HTML-unescaped
 (the scraper stores raw HTML entities such as \verb{&#8217;}) before they
-reach \code{\link[=normalize_text]{normalize_text()}}.
+reach \code{\link[=normalize_text]{normalize_text()}}. \code{country}/\code{site}/\code{year_month} are factors
+(each distinct value stored once, not once per row) to keep the
+combined table's memory footprint down.
+
+This reads the whole requested scope into memory at once. For a large
+archive, prefer \code{\link[=count_archive]{count_archive()}}, which never holds more than one
+country-month of articles at a time.
 }
 \description{
 Expects the on-disk layout produced by CAPE's scraper:
 \verb{<root>/<country>/<newspaper>/<year-month>/articles_<newspaper>_<year-month>.csv(.gz)},
 each file holding the columns \code{site}, \code{date}, \code{title}, \code{url}, \code{text}.
-This is the one function in the package that takes a path rather than a
-table, matching the documented example usage.
+This is one of two functions in the package that take a path rather than
+a table, matching the documented example usage.
 }

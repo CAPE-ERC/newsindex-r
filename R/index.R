@@ -14,11 +14,35 @@ NULL
 
 .population_sd <- function(x) sqrt(mean((x - mean(x))^2))
 
+# Logical mask over `text` (already normalized): does each article contain
+# any of `terms`? Two-stage: loose_component_pattern() first (cheap,
+# over-inclusive) to find candidates, then component_pattern() (precise,
+# word-boundary-checked) only on those -- see their docstrings. Equivalent
+# to `stringi::stri_detect_regex(text, component_pattern(terms))` directly,
+# just far cheaper when most rows don't contain any of `terms` at all.
+.component_survivors_local <- function(text, terms) {
+  candidate_mask <- stringi::stri_detect_regex(text, loose_component_pattern(terms))
+  if (!any(candidate_mask)) {
+    return(candidate_mask)
+  }
+  result <- candidate_mask
+  result[candidate_mask] <- stringi::stri_detect_regex(text[candidate_mask], component_pattern(terms))
+  result
+}
+
 #' Count EPU and total articles per country-site-month
 #'
 #' Every article's country must be present in `dictionary`; an error is
 #' raised naming any country that is not, since a missing country silently
 #' produces an undercount rather than a visible failure.
+#'
+#' Classification is vectorized and short-circuits: per country, each
+#' component (Economic, Policy, Uncertainty) is checked only against the
+#' rows that survived the previous component, since EPU requires all
+#' three, using the cheap-then-precise two-stage pattern (see
+#' [loose_component_pattern()]). This avoids both the per-row/per-term loop
+#' and the full boundary-checked regex cost on articles that plainly don't
+#' qualify, which is most of them.
 #'
 #' @param articles A data.frame of articles.
 #' @param dictionary A `newsindex_dictionary` from [dictionary_load()].
@@ -34,22 +58,119 @@ count_articles <- function(articles, dictionary, country_col = "country", site_c
     stop("countries missing from dictionary: ", paste(missing, collapse = ", "))
   }
 
-  flags <- vapply(seq_len(nrow(articles)), function(i) {
-    entry <- dictionary[[articles[[country_col]][i]]]
-    is_epu(articles[[title_col]][i], articles[[text_col]][i], entry$economic, entry$policy, entry$uncertainty)
-  }, logical(1))
+  title <- as.character(articles[[title_col]])
+  title[is.na(title)] <- ""
+  text <- as.character(articles[[text_col]])
+  text[is.na(text)] <- ""
+  normalized <- vapply(paste(title, text), normalize_text, character(1), USE.NAMES = FALSE)
 
+  countries_col <- as.character(articles[[country_col]])
+  is_epu_flags <- logical(nrow(articles))
+  for (country in unique(countries_col)) {
+    rows <- which(countries_col == country)
+    entry <- dictionary[[country]]
+    survivors <- rep(TRUE, length(rows))
+    for (terms in list(entry$economic, entry$policy, entry$uncertainty)) {
+      if (!any(survivors)) break
+      survivors[survivors] <- .component_survivors_local(normalized[rows[survivors]], terms)
+    }
+    is_epu_flags[rows[survivors]] <- TRUE
+  }
+
+  # Plain character, not factor: read_articles() returns country/site/
+  # year_month as factors to save memory on the large per-article table,
+  # but aggregate()'s formula interface groups over *all* factor levels
+  # (including ones absent here), which would fabricate empty combinations.
   working <- data.frame(
-    country = articles[[country_col]],
-    site = articles[[site_col]],
-    year_month = articles[[month_col]],
-    epu_articles = as.integer(flags),
+    country = as.character(articles[[country_col]]),
+    site = as.character(articles[[site_col]]),
+    year_month = as.character(articles[[month_col]]),
+    epu_articles = as.integer(is_epu_flags),
     all_articles = 1L,
     stringsAsFactors = FALSE
   )
   grouped <- stats::aggregate(
     cbind(epu_articles, all_articles) ~ country + site + year_month,
     data = working, FUN = sum
+  )
+  grouped[order(grouped$country, grouped$site, grouped$year_month), ]
+}
+
+#' Count EPU and total articles per country-site-month directly from an
+#' article archive
+#'
+#' Goes straight from the archive root to the final per-newspaper-month
+#' counts, without ever materializing the whole requested scope in memory
+#' at once.
+#'
+#' Equivalent to `count_articles(dedupe_articles(read_articles(root,
+#' countries = countries)), dictionary)` with the default `dedupe = TRUE`,
+#' but processes one `(country, year-month)` batch at a time -- see
+#' [country_month_batches()] -- discarding each batch's raw article text as
+#' soon as it's been counted. Peak memory stays close to the size of one
+#' country-month's articles, regardless of how many countries, newspapers,
+#' or years `root` spans. This is what [run_index()] and
+#' [run_index_with_baseline()] use internally.
+#'
+#' Deduplication happens within each (country, year-month folder) batch,
+#' matching the archive's own month-folder organization -- equivalent to
+#' deduplicating the whole requested scope at once, unless an article's
+#' actual date disagrees with the month folder it's stored in, in which
+#' case only within-batch duplicates are caught. Pass `dedupe = FALSE` to
+#' skip this and deduplicate the full table yourself instead, if that
+#' distinction matters for your archive.
+#'
+#' @param root Path to the top-level archive directory.
+#' @param dictionary A `newsindex_dictionary` from [dictionary_load()].
+#' @param countries As in [read_articles()].
+#' @param encoding File encoding (default `"UTF-8"`).
+#' @param dedupe If `TRUE` (default), deduplicate each batch before
+#'   counting it.
+#' @param country_col,site_col,month_col,title_col,text_col Column names,
+#'   passed through to [count_articles()].
+#' @param progress If given, a function called with one short status
+#'   string after each batch (e.g. to print it) -- useful for a long run
+#'   against a large archive, so it's visible as working rather than
+#'   looking stalled.
+#' @return A data.frame with columns `country`, `site`, `year_month`,
+#'   `epu_articles`, `all_articles`.
+#' @export
+count_archive <- function(root, dictionary, countries = NULL, encoding = "UTF-8", dedupe = TRUE,
+                           country_col = "country", site_col = "site", month_col = "year_month",
+                           title_col = "title", text_col = "text", progress = NULL) {
+  process_batch <- function(batch) {
+    country <- if (nrow(batch) > 0) as.character(batch[[country_col]][1]) else "?"
+    months <- if (nrow(batch) > 0) sort(unique(as.character(batch[[month_col]]))) else character(0)
+    n_read <- nrow(batch)
+
+    if (dedupe) {
+      batch <- dedupe_articles(batch, url_col = "url", title_col = title_col, text_col = text_col)
+    }
+    n_deduped <- nrow(batch)
+
+    batch_counts <- count_articles(
+      batch, dictionary,
+      country_col = country_col, site_col = site_col, month_col = month_col,
+      title_col = title_col, text_col = text_col
+    )
+
+    if (!is.null(progress)) {
+      epu_total <- sum(batch_counts$epu_articles)
+      month_label <- if (length(months) > 0) paste(months, collapse = ",") else "?"
+      progress(sprintf(
+        "%s %s: %s articles (%s after dedup), %s EPU",
+        country, month_label, format(n_read, big.mark = ","),
+        format(n_deduped, big.mark = ","), format(epu_total, big.mark = ",")
+      ))
+    }
+    batch_counts
+  }
+
+  parts <- country_month_batches(root, process_batch, countries = countries, encoding = encoding)
+  combined <- do.call(rbind, parts)
+  grouped <- stats::aggregate(
+    cbind(epu_articles, all_articles) ~ country + site + year_month,
+    data = combined, FUN = sum
   )
   grouped[order(grouped$country, grouped$site, grouped$year_month), ]
 }

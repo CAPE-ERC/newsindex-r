@@ -37,9 +37,9 @@ baseline_save(out$baseline, "baseline_2015_2024.json")  # reuse next run: pass b
 country <- out$result
 ```
 
-Both print progress by default (`verbose = FALSE` to silence) and accept `countries = c(...)` to read only some of the archive's country folders (default: every folder; folder names are matched case-insensitively). Neither function has a bundled default dictionary -- `dictionary_path` is always an explicit argument, since this package ships no proprietary keyword data.
+Both print progress by default, one line per country-month as it's processed (`verbose = FALSE` to silence), and accept `countries = c(...)` to read only some of the archive's country folders (default: every folder; folder names are matched case-insensitively). Neither function has a bundled default dictionary -- `dictionary_path` is always an explicit argument, since this package ships no proprietary keyword data.
 
-These two calls are thin compositions of `read_articles()`, `dedupe_articles()`, `count_articles()`, and `compute_index()`/`fit_baseline()`+`score_windows()` -- reach for those directly (see Usage below) for anything a single call can't express.
+Both stream the archive internally via `count_archive()` -- see [Performance](#performance) -- rather than reading the whole requested scope into memory at once, so they're the memory-safe choice for a large archive. They compose `count_archive()` with `compute_index()`/`fit_baseline()`+`score_windows()`; reach for the lower-level functions directly (see Usage below) for anything a single call can't express.
 
 ## Usage
 
@@ -58,6 +58,19 @@ gdp <- monthly_gdp(system.file("extdata", "gdp_ppp_2015_2025.csv", package = "ne
 africa <- aggregate_regions(country, gdp, groups = AFRICA_REGIONS, baseline = baseline)
 ```
 
+`read_articles()` here reads the whole requested scope into memory at once, which is simple and fine for a small archive (an example, a few months of one country) but not for a large one -- see [Performance](#performance) for `count_archive()`, the memory-safe alternative `run_index`/`run_index_with_baseline` already use.
+
+## Performance
+
+A large archive (many countries, many newspapers, several years) can be too much article text to hold in memory at once, and classifying it can be slow if done naively. Two things address this, independent of each other:
+
+- **`count_archive(root, dictionary, ...)`** goes straight from the archive root to the final per-newspaper-month counts, without ever building a table of the whole requested scope. It processes one (country, year-month) batch at a time -- every newspaper's articles for one month of one country -- counts it, and discards the raw text before moving to the next batch. Peak memory stays close to the size of one country-month's articles, regardless of how many countries, newspapers, or years `root` spans. `run_index()`/`run_index_with_baseline()` use this internally, so this is automatic for anyone using those. Pass a `progress` function (they do, printing one line per batch via `verbose = TRUE`) to see it moving through a long run instead of it looking stalled.
+- **Classification is vectorized and short-circuits.** `count_articles()` (and therefore `count_archive()`) checks each component (Economic, Policy, Uncertainty) with one combined regex across a whole batch at once (`stringi::stri_detect_regex`), instead of looping over every dictionary term for every article. It also checks a cheap, over-inclusive pattern first and only runs the precise, word-boundary-checked pattern on the rows that pass it (`loose_component_pattern()` / `component_pattern()`) -- and since EPU requires all three components, each one only re-checks the rows that survived the previous one. Most articles don't contain any term from a given component at all, so this avoids the expensive pattern almost entirely for them.
+
+`read_articles()`'s `country`/`site`/`year_month` columns are also factors (each distinct value stored once, not once per row), which matters when that table is large.
+
+None of this changes any function's output -- `count_archive()` produces the same counts as `count_articles(dedupe_articles(read_articles(...)), dictionary)` (see its docstring for the one documented edge case around articles whose actual date disagrees with their month folder).
+
 ## Functions
 
 R doesn't have Python's submodules, so every function is flat in the `newsindex` namespace with a short prefix instead of `ni.module.function()`. Mapping to the Python package:
@@ -73,6 +86,7 @@ R doesn't have Python's submodules, so every function is flat in the `newsindex`
 | `dedup.canonical_url` | `canonical_url()` | URL normalization for deduplication |
 | `dedup.dedupe` | `dedupe_articles()` | drop duplicate articles within a country-month |
 | `index.count` | `count_articles()` | EPU / total article counts per country-site-month |
+| `index.count_archive` | `count_archive()` | stream an archive straight into counts, never holding more than one country-month in memory |
 | `index.compute_index` | `compute_index()` | no-baseline variant: fit and score one window in-sample |
 | `index.fit_baseline` | `fit_baseline()` | fit frozen newspaper `sigma` and country `mu` |
 | `index.score` | `score_index()` | score one window against a frozen baseline |

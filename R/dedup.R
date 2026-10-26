@@ -63,8 +63,7 @@ canonical_url <- function(url) {
   out
 }
 
-.dedup_fallback_key <- function(title, text) {
-  blob <- paste0(normalize_text(title), "\u001f", normalize_text(text))
+.hash_blob <- function(blob) {
   paste0("sha256:", digest::digest(blob, algo = "sha256", serialize = FALSE))
 }
 
@@ -94,9 +93,14 @@ dedupe_articles <- function(articles, group_cols = c("country", "year_month"),
   }
 
   canonical <- vapply(articles[[url_col]], canonical_url, character(1))
-  fallback <- vapply(seq_len(nrow(articles)), function(i) {
-    .dedup_fallback_key(articles[[title_col]][i], articles[[text_col]][i])
-  }, character(1))
+
+  titles <- as.character(articles[[title_col]])
+  titles[is.na(titles)] <- ""
+  texts <- as.character(articles[[text_col]])
+  texts[is.na(texts)] <- ""
+  blob <- paste0(normalize_text(titles), "\u001f", normalize_text(texts))
+  fallback <- vapply(blob, .hash_blob, character(1), USE.NAMES = FALSE)
+
   dedup_key <- ifelse(nzchar(canonical), canonical, fallback)
 
   group_key <- do.call(paste, c(lapply(group_cols, function(col) articles[[col]]), list(sep = "\u001e")))

@@ -1,11 +1,14 @@
 #' One-call orchestration of the EPU pipeline for non-technical users
 #'
-#' `run_index()` and `run_index_with_baseline()` wrap [dictionary_load()],
-#' [read_articles()], [dedupe_articles()], [count_articles()], and
+#' `run_index()` and `run_index_with_baseline()` wrap [dictionary_load()]
+#' and [count_archive()] (which streams the article archive straight into
+#' EPU counts, country-month by country-month, never materializing the
+#' whole requested scope in memory at once) with
 #' [compute_index()]/[fit_baseline()]+[score_windows()] into a single call.
-#' Anyone who needs one of those steps to behave differently should call
-#' the underlying functions directly instead -- these two exist only to
-#' remove the boilerplate around the common case.
+#' Anyone who needs read/dedupe/count as separate, in-memory steps should
+#' call [read_articles()], [dedupe_articles()], and [count_articles()]
+#' directly instead -- these two exist only to remove the boilerplate
+#' around the common case.
 #'
 #' @name pipeline
 NULL
@@ -25,19 +28,14 @@ NULL
 .read_and_count <- function(root, dictionary_path, countries, verbose) {
   kw <- .load_dictionary(dictionary_path, verbose)
 
-  .log(verbose, paste0("Reading articles from ", root, " ..."))
-  articles <- read_articles(root, countries = countries)
+  .log(verbose, paste0("Streaming articles from ", root, " (one country-month at a time) ..."))
+  progress <- if (verbose) function(msg) .log(TRUE, paste0("  ", msg)) else NULL
+  counts <- count_archive(root, kw, countries = countries, progress = progress)
   .log(verbose, paste0(
-    "Read ", nrow(articles), " articles across ", length(unique(articles$country)),
-    " country folder(s)."
+    "Counted ", sum(counts$all_articles), " articles (", sum(counts$epu_articles),
+    " EPU) across ", length(unique(counts$country)), " countr(y/ies)."
   ))
-
-  .log(verbose, "Deduplicating ...")
-  deduped <- dedupe_articles(articles)
-  .log(verbose, paste0(nrow(deduped), " articles remain after deduplication."))
-
-  .log(verbose, "Counting EPU articles per newspaper-month ...")
-  count_articles(deduped, kw)
+  counts
 }
 
 #' Read an article archive and compute a single-window EPU index in one call
