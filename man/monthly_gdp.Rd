@@ -2,10 +2,11 @@
 % Please edit documentation in R/aggregate.R
 \name{monthly_gdp}
 \alias{monthly_gdp}
-\title{Interpolate annual GDP-PPP to monthly values}
+\title{Interpolate annual GDP-PPP (or any other annual-by-country metric) to
+monthly values}
 \usage{
 monthly_gdp(
-  path,
+  source,
   country_col = "Country",
   year_col = "Year",
   value_col = "GDP_Billions_USD",
@@ -15,9 +16,10 @@ monthly_gdp(
 )
 }
 \arguments{
-\item{path}{Path to a CSV with country, year, and value columns.}
+\item{source}{Either a path to a CSV with country, year, and value
+columns, or an already-loaded data.frame with those columns.}
 
-\item{country_col, year_col, value_col}{Column names in the source CSV.}
+\item{country_col, year_col, value_col}{Column names in \code{source}.}
 
 \item{scale}{Multiplies every value after it is read, e.g. \code{scale = 1000}
 to convert a billions-denominated source file to millions.}

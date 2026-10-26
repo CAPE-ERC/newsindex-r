@@ -4,6 +4,8 @@ An R package for building news-based Economic Policy Uncertainty (EPU) indices f
 
 This is the R counterpart of [newsindex (Python)](https://github.com/CAPE-ERC/newsindex-library). Both packages implement the same methodology against the same production keyword dictionary and GDP data, so a country or regional EPU series computed in R should match the one computed in Python exactly.
 
+Regional aggregation isn't locked to GDP-PPP -- `aggregate_regions()`'s `weights` argument accepts your own table (any column, via `weight_col`) or a weighting function; see [Weighting regional aggregation](#weighting-regional-aggregation).
+
 ## Install
 
 ```r
@@ -76,8 +78,8 @@ R doesn't have Python's submodules, so every function is flat in the `newsindex`
 | `index.score` | `score_index()` | score one window against a frozen baseline |
 | `index.score_windows` | `score_windows()` | with-baseline variant: score several later windows at once |
 | `Baseline.save` / `.load` | `baseline_save()` / `baseline_load()` | persist/reload a baseline as JSON |
-| `aggregate.monthly_gdp` | `monthly_gdp()` | annual GDP-PPP -> monthly, log-linear interpolation |
-| `aggregate.aggregate` | `aggregate_regions()` | GDP-weighted regional / Africa z-score aggregation |
+| `aggregate.monthly_gdp` | `monthly_gdp()` | annual GDP-PPP (or any annual metric) -> monthly, log-linear interpolation |
+| `aggregate.aggregate` | `aggregate_regions()` | weighted (GDP-PPP by default, or your own table/function) regional / Africa z-score aggregation |
 | `AFRICA_REGIONS` | `AFRICA_REGIONS` | the five CAPE African regions |
 | `read_articles` | `read_articles()` | read a scraped article archive into one table |
 | `countries` | `countries()` | global ISO 3166-1 + UN M49 country/region reference table |
@@ -142,7 +144,7 @@ For the full 249-row table, call `countries()` or see [`inst/extdata/countries.c
 - **Standardise.** `N_it = S_it / sigma_i`, where `sigma_i` is the newspaper's population standard deviation over the baseline window. The window is always chosen by the caller (the published CAPE Africa EPU index uses 2015-01 to 2025-12; the package has no hardcoded default).
 - **Average and normalise.** `M_t` is the mean of `N_it` across newspapers; `EPU_t = 100 * M_t / mu`, where `mu` is the baseline mean of `M_t`.
 - **Freeze.** `sigma_i`, `mu`, and the retained newspapers are saved as a JSON baseline (`baseline_save()`/`baseline_load()`); later months are scored against it and never recalibrated.
-- **Aggregate.** `z_ct = (EPU_ct - m_c) / s_c`; regional `Z_rt = sum(w_ct * z_ct)` with GDP-PPP weights; rescaled to `100 + 10 * standardised Z_rt`. The Africa series applies the same steps across all countries directly -- it is not an average of the regional series.
+- **Aggregate.** `z_ct = (EPU_ct - m_c) / s_c`; regional `Z_rt = sum(w_ct * z_ct)`, with weights `w_ct` GDP-PPP by default (or any table/function you supply, see below); rescaled to `100 + 10 * standardised Z_rt`. The Africa series applies the same steps across all countries directly -- it is not an average of the regional series.
 
 ### Two ways to compute an index
 
@@ -153,6 +155,21 @@ For the full 249-row table, call `countries()` or see [`inst/extdata/countries.c
   later <- score_windows(counts, baseline, list(c("2025-01", "2025-12")))
   ```
   `score_windows()` just calls `score_index()` once per `c(start, end)` pair and tags each result with a `window` column; `score_index(counts, baseline)` alone is equivalent when you only need one later window and don't need that column.
+
+### Weighting regional aggregation
+
+`aggregate_regions()`'s `weights` argument isn't locked to GDP-PPP. It accepts either:
+
+- **A table** -- `country`/`year_month`/value columns, like `monthly_gdp()`'s output. Use `weight_col` if the value column isn't named `"gdp"` (e.g. a population or trade-volume table you built yourself). Only countries present in the table are included, and within each group-month they're weighted by their share of the group's total.
+- **A function** -- `function(month_rows, group_name)`, called once per group per month with that month's rows (`country`, `z`, ...) and the group's name; return a non-negative weight per row (same length and order as `month_rows`). Weights don't need to be pre-normalised, so equal weighting is just `function(rows, group) rep(1, nrow(rows))`.
+
+```r
+by_population <- aggregate_regions(country, population, weight_col = "population")
+
+equal_weighted <- aggregate_regions(country, function(rows, group) rep(1, nrow(rows)))
+```
+
+`monthly_gdp()` itself also accepts an in-memory data.frame in place of a file path (`source` argument), for a weight table that isn't on disk as annual-GDP-shaped CSV -- any annual by-country metric, not just GDP, interpolates the same way.
 
 ## Examples
 
