@@ -54,6 +54,58 @@ R doesn't have Python's submodules, so every function is flat in the `newsindex`
 | `aggregate.aggregate` | `aggregate_regions()` | GDP-weighted regional / Africa z-score aggregation |
 | `AFRICA_REGIONS` | `AFRICA_REGIONS` | the five CAPE African regions |
 | `read_articles` | `read_articles()` | read a scraped article archive into one table |
+| `countries` | `countries()` | global ISO 3166-1 + UN M49 country/region reference table |
+
+## Countries
+
+`countries()` returns a global country reference table -- not just Africa, and not specific to this package's own naming -- for building your own country groupings (e.g. for `aggregate_regions()`'s `groups` argument) without compiling a list by hand:
+
+```r
+> head(countries(), 3)
+         name iso2 iso3 continent      sub_region intermediate_region
+1 Afghanistan   AF  AFG      Asia   Southern Asia
+2     Albania   AL  ALB    Europe Southern Europe
+3     Algeria   DZ  DZA    Africa Northern Africa
+```
+
+All 249 ISO 3166-1 entries (UN member states and dependencies/territories alike) are included, each with its UN M49 geographic classification. That classification is three columns, and the third is only populated for some countries:
+
+- `continent` -- one of 5 values.
+- `sub_region` -- one of 17 values.
+- `intermediate_region` -- one of 7 values, set **only** for Africa and the Americas (e.g. Nigeria's `sub_region` is "Sub-Saharan Africa" and its `intermediate_region` is "Western Africa"); every other continent's `sub_region` is already the fine-grained level, so `intermediate_region` is blank (`""`) there.
+
+The full hierarchy:
+
+- **Africa**
+  - Northern Africa
+  - Sub-Saharan Africa (Eastern Africa, Middle Africa, Southern Africa, Western Africa)
+- **Americas**
+  - Latin America and the Caribbean (Caribbean, Central America, South America)
+  - Northern America
+- **Asia**
+  - Central Asia
+  - Eastern Asia
+  - South-eastern Asia
+  - Southern Asia
+  - Western Asia
+- **Europe**
+  - Eastern Europe
+  - Northern Europe
+  - Southern Europe
+  - Western Europe
+- **Oceania**
+  - Australia and New Zealand
+  - Melanesia
+  - Micronesia
+  - Polynesia
+
+`continent`/`sub_region`/`intermediate_region` are blank for the two ISO entries UN M49 does not classify (Antarctica; Taiwan, which is not a UN member).
+
+`name` is ISO 3166-1's official short name, which does not always match the names used elsewhere in this package -- e.g. this table's "Congo, Democratic Republic of the" is `AFRICA_REGIONS`'s and the EPU dictionary's "Congo DRC". That's expected: `countries()` is a neutral standard reference, independent of this project's own naming, the same way a GDP source file's "Cabo Verde" needs `DEFAULT_COUNTRY_ALIASES` to line up with "Cape Verde" elsewhere.
+
+`countries()` is purely a reference table: nothing else in this package reads it automatically. `AFRICA_REGIONS` (CAPE's own published Africa EPU grouping) and any `groups` you pass to `aggregate_regions()` yourself are unaffected by it and unchanged.
+
+For the full 249-row table, call `countries()` or see [`inst/extdata/countries.csv`](inst/extdata/countries.csv).
 
 ## Method
 
