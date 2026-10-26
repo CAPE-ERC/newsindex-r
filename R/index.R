@@ -168,6 +168,64 @@ score_index <- function(counts, baseline) {
   result[order(result$country, result$year_month), ]
 }
 
+#' Compute an in-sample index over a single window (the no-baseline variant)
+#'
+#' Fits `sigma`/`mu` from `[start, end]` and scores that same window against
+#' them; nothing is frozen or reused for a later period. Equivalent to
+#' `score_index(window, fit_baseline(window, start, end))` where `window` is
+#' `counts` restricted to `[start, end]`, but callers never see or manage a
+#' `newsindex_baseline`.
+#'
+#' @param counts A data.frame from [count_articles()].
+#' @param start,end `"YYYY-MM"` strings bounding the single window
+#'   (inclusive).
+#' @return A data.frame with columns `country`, `year_month`, `EPU`, `M_t`,
+#'   `mu`, `n_sites`.
+#' @export
+compute_index <- function(counts, start, end) {
+  window <- counts[counts$year_month >= start & counts$year_month <= end, ]
+  baseline <- fit_baseline(window, start, end)
+  score_index(window, baseline)
+}
+
+#' Score one or more later windows against a frozen baseline (the
+#' with-baseline variant)
+#'
+#' `windows` is typically just one period that follows the baseline window,
+#' but any number may be given; they may also overlap or leave gaps between
+#' them. The result adds a `window` column (`"start:end"`) identifying which
+#' pair produced each row.
+#'
+#' @param counts A data.frame from [count_articles()].
+#' @param baseline A `newsindex_baseline` from [fit_baseline()] or
+#'   [baseline_load()].
+#' @param windows A list of two-element character vectors, each
+#'   `c(start, end)` (inclusive `"YYYY-MM"` strings).
+#' @return A data.frame with columns `window`, `country`, `year_month`,
+#'   `EPU`, `M_t`, `mu`, `n_sites`.
+#' @export
+score_windows <- function(counts, baseline, windows) {
+  columns <- c("window", "country", "year_month", "EPU", "M_t", "mu", "n_sites")
+  if (length(windows) == 0) {
+    empty <- as.data.frame(stats::setNames(
+      list(character(), character(), character(), numeric(), numeric(), numeric(), integer()),
+      columns
+    ))
+    return(empty)
+  }
+
+  parts <- lapply(windows, function(w) {
+    start <- w[1]
+    end <- w[2]
+    window_counts <- counts[counts$year_month >= start & counts$year_month <= end, ]
+    scored <- score_index(window_counts, baseline)
+    scored$window <- paste0(start, ":", end)
+    scored[, columns]
+  })
+  result <- do.call(rbind, parts)
+  result[order(result$window, result$country, result$year_month), ]
+}
+
 #' Save a baseline to JSON
 #'
 #' @param baseline A `newsindex_baseline`.
