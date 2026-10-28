@@ -1,6 +1,6 @@
 Package: newsindex
 Title: News-Based Economic Policy Uncertainty (EPU) Indices
-Version: 0.1.0
+Version: 0.2.0
 Authors@R: person("Shakir Adeyemi", "Tewogbade", role = c("aut", "cre"),
     email = "113283849+chaqBD@users.noreply.github.com")
 Description: Builds news-based Economic Policy Uncertainty (EPU) indices

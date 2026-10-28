@@ -41,6 +41,42 @@ Both print progress by default, one line per country-month as it's processed (`v
 
 Both stream the archive internally via `count_archive()` -- see [Performance](#performance) -- rather than reading the whole requested scope into memory at once, so they're the memory-safe choice for a large archive. They compose `count_archive()` with `compute_index()`/`fit_baseline()`+`score_windows()`; reach for the lower-level functions directly (see Usage below) for anything a single call can't express.
 
+### Quick index builders
+
+Shortcuts around `run_index()` for the most common shapes of request, so the call states intent rather than assembling `start`/`end`/`countries` by hand:
+
+```r
+quick_index(root, dict_path, "Nigeria", 2024)                         # one country, one calendar year
+index_all(root, dict_path, "2024-01", "2024-12")                       # every country folder
+index_countries(root, dict_path, c("Nigeria", "Kenya", "Ghana"), "2024-01", "2024-12")
+index_region(root, dict_path, "West", "2024-01", "2024-12")            # a name in AFRICA_REGIONS, or your own vector of countries
+index_since(root, dict_path, months_back = 12)                         # last 12 months ending this calendar month
+```
+
+Every one of these (and `run_index()`/`run_index_with_baseline()` themselves) attaches a `"newsindex_config"` attribute recording the call that produced the result, so `rerun(result)` re-runs that exact call -- for a monthly refresh script, or to reproduce a result someone shared:
+
+```r
+nigeria_2024 <- quick_index(root, dict_path, "Nigeria", 2024)
+nigeria_2024_again <- rerun(nigeria_2024)        # re-runs quick_index()'s underlying run_index() call
+rerun(nigeria_2024, verbose = FALSE)             # override just the verbosity
+```
+
+A `run_index_with_baseline()` result reruns against the exact frozen baseline that scored it (not a refit), so the re-run reproduces the same scoring even if the archive has since changed. `rerun()` only works on a value returned directly from one of these calls (or an explicit config `list(fn = "run_index", ...)` you build yourself) -- the attribute doesn't survive a CSV round-trip.
+
+### Printing, summary & reporting
+
+Turn a result table (`country`, `year_month`, `EPU`, ...) into something readable without reaching for `data.frame` indexing:
+
+```r
+cat(summarize(country_index))              # plain-English per-country summary
+print_period(country_index, "2024-01", "2024-06")   # pretty-print a slice
+describe(country_index)                    # min/max/mean/std + biggest month-over-month move, per country
+top(country_index, n = 5, by = "EPU")      # top-5 country-months by EPU
+report(country_index, "report.html")       # one-page HTML or Markdown report (by extension)
+```
+
+A `newsindex_baseline` also prints a readable one-liner (`print(baseline)`) instead of a raw list dump.
+
 ## Usage
 
 ```r
@@ -99,6 +135,17 @@ R doesn't have Python's submodules, so every function is flat in the `newsindex`
 | `countries` | `countries()` | global ISO 3166-1 + UN M49 country/region reference table |
 | `run_index` | `run_index()` | one-call no-baseline pipeline: read, dedupe, count, and compute an index |
 | `run_index_with_baseline` | `run_index_with_baseline()` | one-call with-baseline pipeline: read, dedupe, count, fit/reuse a baseline, and score |
+| -- | `quick_index()` | one country, one calendar year |
+| -- | `index_all()` | explicit alias for `run_index(..., countries = NULL)` |
+| -- | `index_countries()` | explicit alias naming a `countries` vector |
+| -- | `index_region()` | every country in one `AFRICA_REGIONS` group (or your own vector) |
+| -- | `index_since()` | relative window: the last `months_back` months ending this calendar month |
+| -- | `rerun()` | re-run the exact call that produced a saved result |
+| -- | `summarize()` | plain-English per-country summary of a result table |
+| -- | `print_period()` | pretty-print a `year_month`-filtered slice of a result table |
+| -- | `describe()` | min/max/mean/std + biggest month-over-month move, per country |
+| -- | `top()` | top-N rows of a result table by a column |
+| -- | `report()` | render a one-page HTML or Markdown report |
 
 ## Countries
 

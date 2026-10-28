@@ -177,9 +177,25 @@ count_archive <- function(root, dictionary, countries = NULL, encoding = "UTF-8"
 
 #' @export
 print.newsindex_baseline <- function(x, ...) {
+  countries <- sort(names(x$mu))
+  n <- length(countries)
+  shown <- min(3L, n)
+  if (shown > 0) {
+    examples <- vapply(countries[seq_len(shown)], function(country) {
+      sprintf("%s (%d sites)", country, length(baseline_retained_sites(x, country)))
+    }, character(1))
+    more <- n - shown
+    detail <- paste(examples, collapse = ", ")
+    if (more > 0) {
+      detail <- paste0(detail, ", ... +", more, " more")
+    }
+    detail <- paste0(" -- e.g. ", detail)
+  } else {
+    detail <- ""
+  }
   cat(sprintf(
-    "<newsindex_baseline> %s to %s, %d countries\n",
-    x$start, x$end, length(x$mu)
+    "<newsindex_baseline> %s..%s, %d countr(y/ies)%s\n",
+    x$start, x$end, n, detail
   ))
   invisible(x)
 }

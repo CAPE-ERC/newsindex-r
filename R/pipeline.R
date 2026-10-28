@@ -60,6 +60,10 @@ run_index <- function(root, dictionary_path, start, end, countries = NULL, verbo
   .log(verbose, paste0("Computing index for ", start, "..", end, " ..."))
   result <- compute_index(counts, start, end)
   .log(verbose, paste0("Done: ", nrow(result), " country-month rows."))
+  attr(result, "newsindex_config") <- list(
+    fn = "run_index", root = root, dictionary_path = dictionary_path,
+    start = start, end = end, countries = countries, verbose = verbose
+  )
   result
 }
 
@@ -109,5 +113,180 @@ run_index_with_baseline <- function(root, dictionary_path, windows, baseline = N
   .log(verbose, paste0("Scoring ", length(windows), " window(s) against the baseline ..."))
   result <- score_windows(counts, baseline, windows)
   .log(verbose, paste0("Done: ", nrow(result), " country-month rows."))
+  attr(result, "newsindex_config") <- list(
+    fn = "run_index_with_baseline", root = root, dictionary_path = dictionary_path,
+    windows = windows, countries = countries, verbose = verbose,
+    baseline = baseline, baseline_start = baseline_start, baseline_end = baseline_end
+  )
   list(result = result, baseline = baseline)
+}
+
+#' Run a single country for a single calendar year, no window math required
+#'
+#' Shortcut for [run_index()] with `start`/`end` set to `"<year>-01"`/
+#' `"<year>-12"` and `countries` set to `country`.
+#'
+#' @param root,dictionary_path As in [run_index()].
+#' @param country A single country name.
+#' @param year A single calendar year, e.g. `2024`.
+#' @param verbose As in [run_index()].
+#' @return As [run_index()].
+#' @export
+quick_index <- function(root, dictionary_path, country, year, verbose = TRUE) {
+  run_index(
+    root, dictionary_path,
+    start = sprintf("%d-01", as.integer(year)), end = sprintf("%d-12", as.integer(year)),
+    countries = country, verbose = verbose
+  )
+}
+
+#' Run every country folder under `root` for a window
+#'
+#' Explicit alias for [run_index()] with `countries = NULL` (every folder),
+#' so the call reads as intent rather than a parameter value.
+#'
+#' @param root,dictionary_path,start,end,verbose As in [run_index()].
+#' @return As [run_index()].
+#' @export
+index_all <- function(root, dictionary_path, start, end, verbose = TRUE) {
+  run_index(root, dictionary_path, start, end, countries = NULL, verbose = verbose)
+}
+
+#' Run a named set of countries for a window
+#'
+#' Alias for [run_index()] naming the `countries` argument explicitly, for
+#' discoverability -- [run_index()] already accepts a character vector of
+#' country names there.
+#'
+#' @param root,dictionary_path,start,end,verbose As in [run_index()].
+#' @param countries A character vector of country folder names.
+#' @return As [run_index()].
+#' @export
+index_countries <- function(root, dictionary_path, countries, start, end, verbose = TRUE) {
+  run_index(root, dictionary_path, start, end, countries = countries, verbose = verbose)
+}
+
+#' Run every country in a predefined region for a window
+#'
+#' `region` is either the name of one group in `groups` (default
+#' [AFRICA_REGIONS]), or an explicit character vector of country names
+#' (bypassing `groups` entirely).
+#'
+#' @param root,dictionary_path,start,end,verbose As in [run_index()].
+#' @param region A single region name from `names(groups)`, or a character
+#'   vector of country names.
+#' @param groups A named list of character vectors (default
+#'   [AFRICA_REGIONS]).
+#' @return As [run_index()].
+#' @export
+index_region <- function(root, dictionary_path, region, start, end, groups = AFRICA_REGIONS, verbose = TRUE) {
+  countries <- if (is.character(region) && length(region) == 1) {
+    if (!(region %in% names(groups))) {
+      stop(
+        "unknown region '", region, "'. Available: ",
+        paste(sort(names(groups)), collapse = ", ")
+      )
+    }
+    groups[[region]]
+  } else {
+    region
+  }
+  run_index(root, dictionary_path, start, end, countries = countries, verbose = verbose)
+}
+
+.month_window <- function(months_back, today = Sys.Date()) {
+  if (months_back < 1) {
+    stop("months_back must be >= 1")
+  }
+  end_year <- as.integer(format(today, "%Y"))
+  end_month <- as.integer(format(today, "%m"))
+  end_total <- end_year * 12L + (end_month - 1L)
+  start_total <- end_total - (as.integer(months_back) - 1L)
+  start_year <- start_total %/% 12L
+  start_month <- start_total %% 12L + 1L
+  c(sprintf("%d-%02d", start_year, start_month), sprintf("%d-%02d", end_year, end_month))
+}
+
+#' Run a relative window ending at the current calendar month
+#'
+#' Shortcut for [run_index()] with `start`/`end` computed as the
+#' `months_back` months up to and including the current one (`"now"` is the
+#' machine's system clock, [Sys.Date()], at call time), instead of explicit
+#' `"YYYY-MM"` dates.
+#'
+#' @param root,dictionary_path,verbose As in [run_index()].
+#' @param months_back How many months back from the current month to start
+#'   (inclusive of the current month), default `12`.
+#' @return As [run_index()].
+#' @export
+index_since <- function(root, dictionary_path, months_back = 12, verbose = TRUE) {
+  window <- .month_window(months_back)
+  run_index(root, dictionary_path, window[1], window[2], verbose = verbose)
+}
+
+.extract_newsindex_config <- function(x) {
+  config <- attr(x, "newsindex_config")
+  if (!is.null(config)) {
+    return(config)
+  }
+  if (is.list(x) && !is.data.frame(x) && !is.null(x$fn)) {
+    return(x)
+  }
+  if (is.list(x) && !is.data.frame(x) && !is.null(x$result)) {
+    config <- attr(x$result, "newsindex_config")
+    if (!is.null(config)) {
+      return(config)
+    }
+  }
+  stop(
+    "rerun() needs a 'newsindex_config' attribute (attached automatically by run_index(), ",
+    "run_index_with_baseline(), quick_index(), index_all(), index_countries(), index_region(), ",
+    "and index_since()) or an explicit config list with an 'fn' element. Attributes don't survive ",
+    "things like a write.csv()/read.csv() round-trip -- rerun() only works on a value returned ",
+    "directly from one of those calls, or a config list you build yourself."
+  )
+}
+
+#' Re-run the exact call that produced a saved result
+#'
+#' `previous_result_or_config` is either a result value returned directly
+#' from [run_index()], [run_index_with_baseline()], [quick_index()],
+#' [index_all()], [index_countries()], [index_region()], or [index_since()]
+#' -- all of which attach a `"newsindex_config"` attribute recording the
+#' call that produced them -- or an explicit config `list` with the same
+#' shape (an `fn` element naming which function to call, plus its
+#' arguments).
+#'
+#' For a `run_index_with_baseline()`-produced result, `rerun()` always
+#' reuses the exact `newsindex_baseline` object that scored it (frozen, not
+#' refit from `baseline_start`/`baseline_end`), so the re-run reproduces the
+#' same scoring even if the underlying archive has since changed.
+#'
+#' @param previous_result_or_config A result from one of the functions
+#'   above, or an explicit config list.
+#' @param verbose If given, overrides the stored `verbose` value.
+#' @return Whatever the original call returned.
+#' @export
+rerun <- function(previous_result_or_config, verbose = NULL) {
+  config <- .extract_newsindex_config(previous_result_or_config)
+  if (is.null(config$fn)) {
+    stop("rerun(): config is missing an 'fn' element naming which function to re-run")
+  }
+  v <- if (is.null(verbose)) {
+    if (is.null(config$verbose)) TRUE else config$verbose
+  } else {
+    verbose
+  }
+
+  if (config$fn == "run_index") {
+    run_index(config$root, config$dictionary_path, config$start, config$end,
+      countries = config$countries, verbose = v
+    )
+  } else if (config$fn == "run_index_with_baseline") {
+    run_index_with_baseline(config$root, config$dictionary_path, config$windows,
+      baseline = config$baseline, countries = config$countries, verbose = v
+    )
+  } else {
+    stop("rerun(): unknown fn '", config$fn, "'")
+  }
 }
